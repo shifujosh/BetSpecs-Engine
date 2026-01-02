@@ -1,164 +1,114 @@
-#!/usr/bin/env python3
 """
-Example: Trust Layer Verification
-
-This script demonstrates how the Trust Layer catches
-AI hallucinations before they reach the user.
-
-Usage:
-    python examples/verify_prediction.py
+BetSpecs Trust Layer Example
+---------------------------
+Demonstrates how the Trust Layer catches hallucinations and validates
+domain-specific nuances like line movement and team aliases.
 """
 
+from decimal import Decimal
+from datetime import datetime, timezone
 import sys
 from pathlib import Path
-from datetime import datetime, timezone
-from decimal import Decimal
 
-# Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from trust_layer.validator import (
-    TrustLayerValidator,
-    AIPrediction,
-    VerificationStatus,
-)
+from trust_layer.validator import TrustLayerValidator, AIPrediction
 
 
-def demonstrate_valid_prediction():
-    """Show a prediction that passes verification."""
-    print("\n" + "=" * 60)
-    print("SCENARIO 1: Valid AI Prediction")
-    print("=" * 60)
-    
+def run_demo():
+    print("Initializing Trust Layer Validator...")
     validator = TrustLayerValidator()
     
-    # Simulated AI output
-    prediction = AIPrediction(
-        event_id="nba_2025_lal_bos",
+    # 1. The "Happy Path" - Valid Prediction with Intelligent Alias Matching
+    print("\n--- Scenario 1: Valid Prediction (Alias Resolution) ---")
+    pred_good = AIPrediction(
+        event_id="evt_101",
         prediction_type="moneyline",
-        predicted_value="Los Angeles Lakers",
-        confidence=0.68,
-        reasoning="Lakers 8-2 in last 10 home games. Celtics missing key starter.",
-        generated_at=datetime.now(timezone.utc),
+        selection="Dubs",  # Slang for Warriors
+        odds_claimed=Decimal("-150"),
+        confidence=0.85,
+        reasoning="Home court advantage is significant."
     )
     
-    # Simulated verified source data
-    source_odds = Decimal("-145")
-    source_team = "Los Angeles Lakers"
+    print(f"AI Claim: {pred_good.selection} at {pred_good.odds_claimed} ({pred_good.reasoning})")
+    print("Source: Golden State Warriors at -150")
     
-    print(f"\nAI Prediction:")
-    print(f"  Team: {prediction.predicted_value}")
-    print(f"  Confidence: {prediction.confidence:.0%}")
-    print(f"  Reasoning: {prediction.reasoning}")
-    
-    print(f"\nSource Data:")
-    print(f"  Team: {source_team}")
-    print(f"  Odds: {source_odds}")
-    
-    # Run verification
     passed, results = validator.verify_prediction(
-        prediction=prediction,
-        source_odds=source_odds,
-        source_team=source_team
+        prediction=pred_good,
+        source_odds=Decimal("-150"),
+        source_team="Golden State Warriors"
     )
     
-    print(f"\n{'✅ VERIFIED' if passed else '❌ REJECTED'}")
-    for result in results:
-        status_icon = "✓" if result.status == VerificationStatus.VERIFIED else "✗"
-        print(f"  {status_icon} {result.claim}: {result.status.value}")
+    print(f"Result: {'✅ PASSED' if passed else '❌ FAILED'}")
+    for r in results:
+        print(f"  - [{r.status.value.upper()}] {r.claim_type}: {r.claim_value} vs {r.source_value}")
+        if r.metadata:
+            print(f"    Metadata: {r.metadata}")
 
 
-def demonstrate_hallucinated_prediction():
-    """Show a prediction with hallucinated data that gets caught."""
-    print("\n" + "=" * 60)
-    print("SCENARIO 2: AI Hallucination Caught")
-    print("=" * 60)
-    
-    validator = TrustLayerValidator()
-    
-    # Simulated AI output with hallucination
-    prediction = AIPrediction(
-        event_id="nba_2025_lal_bos",
-        prediction_type="moneyline",
-        predicted_value="Boston Celtics",  # WRONG - AI hallucinated
-        confidence=1.2,  # INVALID - over 100%
-        reasoning="Celtics undefeated this season.",  # FALSE
-        generated_at=datetime.now(timezone.utc),
+    # 2. The "Hallucination" - Odds don't match reality
+    print("\n--- Scenario 2: Hallucination Detection ---")
+    pred_bad = AIPrediction(
+        event_id="evt_102",
+        prediction_type="point_spread",
+        selection="Chiefs",
+        odds_claimed=Decimal("+3.5"),  # AI thinks they are getting points
+        confidence=0.92,
+        reasoning="Mahomes is an underdog here."
     )
     
-    # Verified source data
-    source_odds = Decimal("-145")
-    source_team = "Los Angeles Lakers"  # Actual favorite
+    print(f"AI Claim: {pred_bad.selection} {pred_bad.odds_claimed}")
+    print("Source: Kansas City Chiefs -2.5 (Favorites)")
     
-    print(f"\nAI Prediction (with hallucinations):")
-    print(f"  Team: {prediction.predicted_value} ← WRONG")
-    print(f"  Confidence: {prediction.confidence:.0%} ← INVALID")
-    print(f"  Reasoning: {prediction.reasoning}")
-    
-    print(f"\nSource Data:")
-    print(f"  Team: {source_team}")
-    print(f"  Odds: {source_odds}")
-    
-    # Run verification
     passed, results = validator.verify_prediction(
-        prediction=prediction,
-        source_odds=source_odds,
-        source_team=source_team
+        prediction=pred_bad,
+        source_odds=Decimal("-2.5"),  # Actual odds
+        source_team="Kansas City Chiefs"
     )
     
-    print(f"\n{'✅ VERIFIED' if passed else '❌ REJECTED'}")
-    for result in results:
-        status_icon = "✓" if result.status == VerificationStatus.VERIFIED else "✗"
-        print(f"  {status_icon} {result.claim}: {result.status.value}")
-        if result.discrepancy:
-            print(f"      Reason: {result.discrepancy}")
+    print(f"Result: {'✅ PASSED' if passed else '❌ FAILED'}")
+    for r in results:
+        status_icon = "✅" if r.status == "verified" else "mw-emoji" if r.status == "partial" else "❌"
+        # Correct icon for partial? use ⚠️
+        if r.status == "partial": status_icon = "⚠️ "
+        if r.status == "failed": status_icon = "❌"
+        
+        print(f"  - [{status_icon}] {r.claim_type}: {r.discrepancy}")
 
 
-def demonstrate_odds_verification():
-    """Show odds value verification."""
-    print("\n" + "=" * 60)
-    print("SCENARIO 3: Odds Verification")
-    print("=" * 60)
+    # 3. The "Line Move" - Close but moved
+    print("\n--- Scenario 3: Line Movement Detection ---")
+    pred_move = AIPrediction(
+        event_id="evt_103",
+        prediction_type="total",
+        selection="Over",
+        odds_claimed=Decimal("210.5"),
+        confidence=0.8,
+        reasoning="High pace game expected."
+    )
     
-    validator = TrustLayerValidator(tolerance=Decimal("0.5"))
+    print(f"AI Claim: Total {pred_move.odds_claimed}")
+    print("Source: Total 212.0 (Line moved up)")
     
-    test_cases = [
-        ("Lakers", Decimal("-145"), Decimal("-145"), "Exact match"),
-        ("Celtics", Decimal("+125"), Decimal("+125.3"), "Within tolerance"),
-        ("Warriors", Decimal("-200"), Decimal("-155"), "Hallucinated odds"),
-    ]
+    passed, results = validator.verify_prediction(
+        prediction=pred_move,
+        source_odds=Decimal("212.0"),
+        source_team="Over" # N/A for totals
+    )
     
-    print("\nVerifying AI-claimed odds against source:")
-    print("-" * 60)
-    
-    for team, claimed, source, description in test_cases:
-        result = validator.verify_odds_claim(claimed, source, team)
-        status_icon = "✓" if result.status == VerificationStatus.VERIFIED else "✗"
-        print(f"  {status_icon} {team}: AI={claimed}, Source={source} → {result.status.value}")
-        print(f"      ({description})")
-    
-    print("\n" + "-" * 60)
-    summary = validator.get_verification_summary()
-    print(f"Summary: {summary['verified']}/{summary['total_checks']} verified ({summary['pass_rate']:.0%})")
+    print(f"Result: {'✅ PASSED' if passed else '❌ FAILED'}")
+    for r in results:
+        print(f"  - [{r.status.value.upper()}] {r.claim_type}: {r.discrepancy}")
+        if r.metadata:
+            print(f"    Metadata: {r.metadata}")
 
 
-def main():
-    """Run all demonstrations."""
-    print("=" * 60)
-    print("BetSpecs Trust Layer Demonstration")
-    print("=" * 60)
-    print("\nThe Trust Layer prevents AI hallucinations from reaching users.")
-    print("Every AI output is cross-referenced against verified source data.")
-    
-    demonstrate_valid_prediction()
-    demonstrate_hallucinated_prediction()
-    demonstrate_odds_verification()
-    
-    print("\n" + "=" * 60)
-    print("Trust Layer demonstration complete.")
-    print("No unverified AI outputs reached the display.")
-    print("=" * 60 + "\n")
+    # Audit Log
+    print("\n--- Audit Log Export ---")
+    stats = validator.get_statistics()
+    print(f"Total Verifications: {stats['total_verifications']}")
+    print(f"Rejection Rate: {stats['rejection_rate']:.1%}")
 
 
 if __name__ == "__main__":
-    main()
+    run_demo()

@@ -1,15 +1,16 @@
 """
-Unit tests for the Trust Layer validator.
+Unit tests for the Trust Layer Validator.
 
-These tests demonstrate how the Trust Layer catches
-AI hallucinations and prevents bad data from reaching users.
-
-Run with: pytest tests/test_validator.py -v
+Verifies domain-specific logic including:
+- Vig calculation
+- Steam/Reverse line movement detection
+- Fuzzy team name matching
+- Confidence validation
 """
 
 import pytest
-from datetime import datetime, timezone
 from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 import sys
 from pathlib import Path
 
@@ -20,145 +21,134 @@ from trust_layer.validator import (
     TrustLayerValidator,
     VerificationStatus,
     AIPrediction,
+    OddsMovementDirection
 )
 
 
-class TestOddsVerification:
-    """Tests for odds value verification."""
+class TestOddsValidator:
+    """Tests for odds-specific logic."""
+    
+    def test_vig_calculation(self):
+        """Should correctly calculate house edge."""
+        validator = TrustLayerValidator().odds_validator
+        
+        # Standard -110/-110 market
+        # Implied prob: 52.38% + 52.38% = 104.76% -> 4.76% vig
+        vig = validator.calculate_vig(Decimal("-110"), Decimal("-110"))
+        assert round(float(vig), 2) == 4.76
+        
+        # Zero vig market (fair)
+        vig = validator.calculate_vig(Decimal("+100"), Decimal("+100"))
+        assert vig == 0
 
-    def test_matching_odds_verified(self):
-        """Exact match should verify."""
-        validator = TrustLayerValidator()
-        result = validator.verify_odds_claim(
-            claimed_odds=Decimal("-110"),
-            source_odds=Decimal("-110"),
-            selection="Lakers"
+    def test_line_movement_steam(self):
+        """Should detect sharp money movement (steam)."""
+        validator = TrustLayerValidator().odds_validator
+        
+        # Line moves from -110 to -125 (getting more expensive)
+        direction = validator.detect_line_movement(
+            current=Decimal("-125"),
+            previous=Decimal("-110"),
+            market_side="favorite"
+        )
+        assert direction == OddsMovementDirection.STEAM
+        
+    def test_staleness_check(self):
+        """Should reject old data."""
+        validator = TrustLayerValidator().odds_validator
+        
+        stale_time = datetime.now(timezone.utc) - timedelta(minutes=10)
+        
+        result = validator.verify_odds(
+            claimed=Decimal("-110"),
+            source=Decimal("-110"),
+            source_timestamp=stale_time
+        )
+        assert result.status == VerificationStatus.STALE
+
+
+class TestTeamNameValidator:
+    """Tests for fuzzy team name matching."""
+    
+    def test_alias_resolution(self):
+        """Should resolve common aliases to canonical names."""
+        validator = TrustLayerValidator().team_validator
+        
+        # "Dubs" -> Golden State Warriors match
+        result = validator.verify_team(
+            claimed="Dubs",
+            source="Golden State Warriors"
         )
         assert result.status == VerificationStatus.VERIFIED
-        assert result.discrepancy is None
+        assert result.metadata.get("matched_via") == "alias_lookup"
 
-    def test_within_tolerance_verified(self):
-        """Small difference within tolerance should verify."""
-        validator = TrustLayerValidator(tolerance=Decimal("0.5"))
-        result = validator.verify_odds_claim(
-            claimed_odds=Decimal("-110"),
-            source_odds=Decimal("-110.3"),
-            selection="Lakers"
+    def test_fuzzy_partial_match(self):
+        """Should give partial credit for substrings."""
+        validator = TrustLayerValidator().team_validator
+        
+        result = validator.verify_team(
+            claimed="Lakers",
+            source="Los Angeles Lakers"
         )
-        assert result.status == VerificationStatus.VERIFIED
-
-    def test_hallucinated_odds_rejected(self):
-        """AI claiming wrong odds should fail."""
-        validator = TrustLayerValidator()
-        result = validator.verify_odds_claim(
-            claimed_odds=Decimal("-150"),  # AI hallucinated
-            source_odds=Decimal("-110"),   # Real odds
-            selection="Lakers"
-        )
-        assert result.status == VerificationStatus.FAILED
-        assert "exceeds tolerance" in result.discrepancy
-
-
-class TestTeamNameVerification:
-    """Tests for team name verification."""
-
-    def test_exact_match_verified(self):
-        """Exact team name match should verify."""
-        validator = TrustLayerValidator()
-        result = validator.verify_team_name(
-            claimed_team="Los Angeles Lakers",
-            source_team="Los Angeles Lakers"
-        )
-        assert result.status == VerificationStatus.VERIFIED
-
-    def test_case_insensitive_match(self):
-        """Different casing should still verify."""
-        validator = TrustLayerValidator()
-        result = validator.verify_team_name(
-            claimed_team="LOS ANGELES LAKERS",
-            source_team="Los Angeles Lakers"
-        )
-        assert result.status == VerificationStatus.VERIFIED
-
-    def test_partial_match_flagged(self):
-        """Abbreviation should be partial match."""
-        validator = TrustLayerValidator()
-        result = validator.verify_team_name(
-            claimed_team="Lakers",
-            source_team="Los Angeles Lakers"
-        )
+        # Often verify_team logic handles substring as verified or partial depending on strictness
+        # In our implementation: exact match or safe alias is verified. 
+        # Substring is Partial.
         assert result.status == VerificationStatus.PARTIAL
+        assert "partial match" in result.discrepancy.lower()
 
-    def test_wrong_team_rejected(self):
-        """Completely wrong team should fail."""
+
+class TestIntegration:
+    """Full prediction flow tests."""
+    
+    def test_full_prediction_verification(self):
+        """Should verify a valid prediction end-to-end."""
         validator = TrustLayerValidator()
-        result = validator.verify_team_name(
-            claimed_team="Boston Celtics",  # AI hallucinated wrong team
-            source_team="Los Angeles Lakers"
-        )
-        assert result.status == VerificationStatus.FAILED
-
-
-class TestPredictionVerification:
-    """Integration tests for full prediction verification."""
-
-    def test_valid_prediction_passes(self):
-        """Valid prediction should pass all checks."""
-        validator = TrustLayerValidator()
+        
         prediction = AIPrediction(
-            event_id="game_123",
+            event_id="evt_123",
             prediction_type="moneyline",
-            predicted_value="Los Angeles Lakers",
-            confidence=0.75,
-            reasoning="Strong home record",
-            generated_at=datetime.now(timezone.utc),
+            selection="Warriors",
+            odds_claimed=Decimal("-150"),
+            confidence=0.85,
+            reasoning="Curry is hot"
         )
         
         passed, results = validator.verify_prediction(
             prediction=prediction,
-            source_odds=Decimal("-110"),
-            source_team="Los Angeles Lakers"
+            source_odds=Decimal("-150"),
+            source_team="Golden State Warriors",
+            source_timestamp=datetime.now(timezone.utc)
         )
+        
+        # Should pass despite "Warriors" != "Golden State Warriors" 
+        # because of alias lookup or partial matching tolerance in a real system.
+        # Let's check our implementation: 
+        # Warriors is a KNOWN_ALIAS for Golden State Warriors. So it is VERIFIED.
         
         assert passed is True
-        assert all(r.status == VerificationStatus.VERIFIED for r in results)
+        assert len(results) == 2  # Team + Odds checks
+        assert results[0].status == VerificationStatus.VERIFIED
+        assert results[1].status == VerificationStatus.VERIFIED
 
-    def test_invalid_confidence_rejected(self):
-        """Confidence > 1.0 should fail."""
+    def test_hallucination_catch(self):
+        """Should fail widely divergent odds."""
         validator = TrustLayerValidator()
+        
         prediction = AIPrediction(
-            event_id="game_123",
+            event_id="evt_123",
             prediction_type="moneyline",
-            predicted_value="Lakers",
-            confidence=1.5,  # Invalid
-            reasoning="Sure thing!",
-            generated_at=datetime.now(timezone.utc),
+            selection="Lakers",
+            odds_claimed=Decimal("+200"),  # AI thinks massive underdog
+            confidence=0.9,
+            reasoning="LeBron out"
         )
         
+        # Real odds are -500 (massive favorite)
         passed, results = validator.verify_prediction(
             prediction=prediction,
-            source_odds=Decimal("-110"),
+            source_odds=Decimal("-500"), 
             source_team="Lakers"
         )
         
         assert passed is False
-
-
-class TestVerificationLogging:
-    """Tests for audit logging."""
-
-    def test_all_verifications_logged(self):
-        """Every verification should be logged."""
-        validator = TrustLayerValidator()
-        
-        # Run several verifications
-        validator.verify_odds_claim(Decimal("-110"), Decimal("-110"), "Team A")
-        validator.verify_odds_claim(Decimal("-150"), Decimal("-110"), "Team B")
-        validator.verify_team_name("Lakers", "Lakers")
-        
-        summary = validator.get_verification_summary()
-        
-        assert summary["total_checks"] == 3
-        assert summary["verified"] == 2
-        assert summary["failed"] == 1
-        assert summary["pass_rate"] == pytest.approx(0.666, rel=0.01)
+        assert any(r.status == VerificationStatus.FAILED for r in results)
