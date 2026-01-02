@@ -1,44 +1,52 @@
-# BetSpecs: Deterministic RAG & Real-Time Ingestion
+# BetSpecs: Real-Time Analytics That Never Hallucinates
 
-> **Note:** Source code is proprietary. This repository demonstrates the verification architecture.
+> *A verification layer that catches AI mistakes before they reach users.*
 
-BetSpecs is a real-time analytics engine that solves the "hallucination problem" in LLMs when dealing with numerical sports data. It operates as a specialized **Swarm Agent** within the **[JACQ Ecosystem](https://github.com/shifujosh/JACQ-Architecture)**.
+---
 
-It introduces a **Verification Layer**—inspired by high-frequency trading pipelines (see [Market-Data-Pipeline-Ref](https://github.com/shifujosh/Market-Data-Pipeline-Ref-))—that forces LLM outputs to pass a deterministic truth check against raw SQL data.
+## The Problem
 
-## The Verification Flow
+AI is great at generating text, but it often invents numbers. Ask an LLM for sports stats, and it might confidently tell you a player scored 30 points when they actually scored 20. This is called "hallucination"—and it is unacceptable for real-time analytics.
+
+## The Solution
+
+BetSpecs cross-checks every AI output against verified data before displaying it.
+
+If the AI says something that does not match the source data, the output is **rejected and regenerated**. This creates a "Trust Layer" that ensures users only see accurate information.
+
+---
+
+## How It Works
 
 ```mermaid
 flowchart LR
-    %% --- Styling (Dark Mode Native) ---
     classDef stream fill:#1e293b,stroke:#3b82f6,stroke-width:1px,color:#93c5fd;
     classDef db fill:#1e293b,stroke:#0ea5e9,stroke-width:2px,color:#7dd3fc;
     classDef logic fill:#1e293b,stroke:#a855f7,stroke-width:2px,color:#d8b4fe;
     classDef error fill:#2a1a1a,stroke:#ef4444,stroke-width:2px,color:#fca5a5;
     classDef success fill:#1e293b,stroke:#10b981,stroke-width:2px,color:#6ee7b7;
 
-    Stream[Real-Time Data Stream]:::stream -->|Ingest| Norm[Normalized Schema]:::db
-    Norm -.->|See Bloomberg Pipeline Ref| DB[(SQL Ground Truth)]:::db
+    Data[Live Data]:::stream --> DB[(Verified Source)]:::db
+    User[User Query]:::stream --> AI[AI Response]:::logic
     
-    User[User Query] -->|Intent| LLM[LLM Inference]:::stream
-    LLM -->|Retrieval| DB
-    
-    subgraph "Trust Layer (Data Physics)"
-        LLM -->|Draft Output| Verifier[Verification Agent]:::logic
-        DB -->|Cross-Reference| Verifier
-        Verifier -->|Pass| Final[Client UI]:::success
-        Verifier -.->|Fail| Error[Reject & Regenerate]:::error
+    subgraph Trust ["🛡️ Trust Layer"]
+        AI --> Check{"Does it match?"}:::logic
+        DB --> Check
+        Check -->|Yes| Display[✅ Show to User]:::success
+        Check -->|No| Reject[❌ Regenerate]:::error
     end
 ```
 
-## Key Innovations
+**The key insight:** The verification step is *not* an AI. It is a deterministic logic engine that compares structured data. AI generates; logic verifies.
 
-### 1. Vector Anchors
-We do not feed raw stats to the LLM context blindly. We use "Anchor Embeddings" to retrieve only the relevant game state rows, reducing context window noise.
+---
 
-### 2. Deterministic Logic Gates
-The **Verification Agent** is not an LLM. It is a logic engine that parses the LLM's JSON output and queries the SQL database directly. 
-- If `LLM says "Player scored 30"` AND `DB says "Player scored 20"` -> **REJECT & REGENERATE**.
+## Built With
 
-### 3. Real-Time Ingestion
-Data is normalized from multiple firehose providers (Sportradar, Genius) and normalized into a unified schema within sub-milliseconds.
+- **TypeScript** — 100% type-safe across all I/O
+- **Firebase** — Real-time data sync
+- **Zod** — Runtime validation
+
+---
+
+> **[Back to Profile](https://github.com/shifujosh)**
