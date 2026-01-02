@@ -2,7 +2,9 @@
 
 > **Note:** Source code is proprietary. This repository demonstrates the verification architecture.
 
-BetSpecs is a real-time analytics engine that solves the "hallucination problem" in LLMs when dealing with numerical sports data. It introduces a **Verification Layer** that forces LLM outputs to pass a deterministic truth check against raw SQL data before being presented to the user.
+BetSpecs is a real-time analytics engine that solves the "hallucination problem" in LLMs when dealing with numerical sports data. It operates as a specialized **Swarm Agent** within the **[JACQ Ecosystem](https://github.com/shifujosh/JACQ-Architecture)**.
+
+It introduces a **Verification Layer**—inspired by high-frequency trading pipelines (see [Market-Data-Pipeline-Ref](https://github.com/shifujosh/Market-Data-Pipeline-Ref-))—that forces LLM outputs to pass a deterministic truth check against raw SQL data.
 
 ## The Verification Flow
 
