@@ -10,16 +10,24 @@ It introduces a **Verification Layer**—inspired by high-frequency trading pipe
 
 ```mermaid
 flowchart LR
-    Stream[Real-Time Data Stream] -->|Ingest| Norm[Normalization Layer]
-    Norm -->|Structured Data| DB[(SQL Ground Truth)]
+    %% --- Styling (Dark Mode Native) ---
+    classDef stream fill:#1e293b,stroke:#3b82f6,stroke-width:1px,color:#93c5fd;
+    classDef db fill:#1e293b,stroke:#0ea5e9,stroke-width:2px,color:#7dd3fc;
+    classDef logic fill:#1e293b,stroke:#a855f7,stroke-width:2px,color:#d8b4fe;
+    classDef error fill:#2a1a1a,stroke:#ef4444,stroke-width:2px,color:#fca5a5;
+    classDef success fill:#1e293b,stroke:#10b981,stroke-width:2px,color:#6ee7b7;
+
+    Stream[Real-Time Data Stream]:::stream -->|Ingest| Norm[Normalized Schema]:::db
+    Norm -.->|See Bloomberg Pipeline Ref| DB[(SQL Ground Truth)]:::db
     
-    User[User Query] -->|Intent| LLM[LLM Inference]
+    User[User Query] -->|Intent| LLM[LLM Inference]:::stream
     LLM -->|Retrieval| DB
     
-    subgraph "Trust Layer"
-        LLM -->|Draft Output| Verifier[Verification Agent]
+    subgraph "Trust Layer (Data Physics)"
+        LLM -->|Draft Output| Verifier[Verification Agent]:::logic
         DB -->|Cross-Reference| Verifier
-        Verifier -->|Pass/Fail| Final[Client UI]
+        Verifier -->|Pass| Final[Client UI]:::success
+        Verifier -.->|Fail| Error[Reject & Regenerate]:::error
     end
 ```
 
