@@ -27,7 +27,25 @@ It is a dashboard where I can see real-time odds, AI-driven insights, and my own
 
 ## Architecture
 
-*Diagram to follow.*
+```mermaid
+flowchart LR
+    classDef input fill:#1e293b,stroke:#3b82f6,stroke-width:1px,color:#93c5fd;
+    classDef core fill:#1e293b,stroke:#a855f7,stroke-width:2px,color:#d8b4fe;
+    classDef verify fill:#1e293b,stroke:#ef4444,stroke-width:2px,color:#fca5a5;
+    classDef output fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#6ee7b7;
+
+    Sources["Data Sources"]:::input --> Ingest["Ingest"]:::core
+    Ingest --> DB[(Verified Store)]:::input
+    
+    User["User Query"]:::input --> AI["AI Analysis"]:::core
+    DB --> AI
+    
+    AI --> Trust{"Trust Layer"}:::verify
+    DB --> Trust
+    
+    Trust -->|Pass| Display["✅ Display"]:::output
+    Trust -->|Fail| Regenerate["🔄 Retry"]:::verify
+```
 
 ---
 
